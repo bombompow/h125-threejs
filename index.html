@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Airbus H125</title>
+    <link rel="stylesheet" href="./src/style.css" />
+  </head>
+  <body>
+    <canvas id="scene"></canvas>
+    <div class="hud">
+      <h1>Airbus H125</h1>
+      <p>Drag to orbit · scroll or pinch to zoom · right-drag to pan</p>
+    </div>
+    <div class="controls">
+      <div class="views" role="group" aria-label="Camera views">
+        <button type="button" data-view="home">3/4</button>
+        <button type="button" data-view="front">Front</button>
+        <button type="button" data-view="side">Side</button>
+        <button type="button" data-view="rear">Rear</button>
+        <button type="button" data-view="top">Top</button>
+        <button type="button" data-view="cockpit">Cockpit</button>
+      </div>
+      <button id="spin" type="button" aria-pressed="false">Spin rotors</button>
+    </div>
+    <div id="loading" class="loading">Loading H125…</div>
+    <script type="module" src="./src/main.js"></script>
+  </body>
+</html>
