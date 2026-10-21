@@ -26,10 +26,10 @@ const sun = new THREE.DirectionalLight(0xffffff, 2.2);
 sun.position.set(6, 12, 5);
 sun.castShadow = true;
 sun.shadow.mapSize.set(2048, 2048);
-sun.shadow.camera.left = -9;
-sun.shadow.camera.right = 9;
-sun.shadow.camera.top = 9;
-sun.shadow.camera.bottom = -9;
+sun.shadow.camera.left = -11;
+sun.shadow.camera.right = 11;
+sun.shadow.camera.top = 11;
+sun.shadow.camera.bottom = -11;
 sun.shadow.camera.near = 1;
 sun.shadow.camera.far = 30;
 sun.shadow.bias = -0.0004;
@@ -47,7 +47,7 @@ floor.receiveShadow = true;
 scene.add(floor);
 
 const pad = new THREE.Mesh(
-  new THREE.RingGeometry(6.2, 6.4, 96),
+  new THREE.RingGeometry(7.2, 7.4, 96),
   new THREE.MeshStandardMaterial({ color: 0xf2f2f2, roughness: 0.8 })
 );
 pad.rotation.x = -Math.PI / 2;
@@ -58,7 +58,7 @@ const helicopter = createH125();
 scene.add(helicopter.root);
 
 const camera = new THREE.PerspectiveCamera(40, window.innerWidth / window.innerHeight, 0.1, 200);
-const home = { position: new THREE.Vector3(7.5, 3.6, 8.5), target: new THREE.Vector3(-1.6, 1.5, 0) };
+const home = { position: new THREE.Vector3(8, 3.8, 9.5), target: new THREE.Vector3(-2, 1.5, 0) };
 camera.position.copy(home.position);
 
 const controls = new OrbitControls(camera, canvas);
