@@ -205,6 +205,7 @@ const inRange = (deg, from, to) => (from <= to ? deg >= from && deg <= to : deg 
 // Blunt rounded nose, long flat-floored cabin, rear fuselage whose belly sweeps
 // up into a long tapering tail boom.
 const FUSELAGE_PROFILES = [
+  { x: 3.31, yb: 1.245, yt: 1.255, hw: 0.002, nt: 2, nb: 2 },
   { x: 3.3, yb: 1.2, yt: 1.3, hw: 0.06, nt: 2, nb: 2 },
   { x: 3.25, yb: 0.98, yt: 1.62, hw: 0.42, nt: 2.2, nb: 2.2 },
   { x: 3.12, yb: 0.84, yt: 1.9, hw: 0.62, nt: 2.3, nb: 2.4 },
@@ -234,7 +235,7 @@ const STRIPE_END_X = -2.6;
 
 // Which quads of the fuselage are glazing rather than paint.
 function fuselageRegion(x, t) {
-  const noseCap = x > 3.29;
+  const noseCap = x > 3.28;
   const windscreen =
     x > 1.95 &&
     inRange(t, 338, 202) &&

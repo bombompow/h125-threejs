@@ -11,7 +11,7 @@ npm install
 npm run dev
 ```
 
-Then open the URL Vite prints. Drag to orbit, scroll or pinch to zoom, right-drag to pan. The "Spin rotors" button starts the main and tail rotors.
+Then open the URL Vite prints. Drag to orbit, scroll or pinch to zoom, right-drag to pan. The buttons along the bottom fly the camera to preset views (3/4, front, side, rear, top, cockpit), and "Spin rotors" starts the main and tail rotors.
 
 ## Project layout
 
