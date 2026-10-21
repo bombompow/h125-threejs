@@ -37,7 +37,7 @@ sun.shadow.normalBias = 0.02;
 scene.add(sun);
 scene.add(new THREE.HemisphereLight(0xffffff, 0x8a8f96, 0.4));
 
-// Ground: a soft shadow catcher on top of a large matte floor.
+// Ground: pale concrete with a darker helipad, touchdown ring and "H" marking.
 const floor = new THREE.Mesh(
   new THREE.CircleGeometry(60, 64),
   new THREE.MeshStandardMaterial({ color: 0xc9ced4, roughness: 0.95 })
@@ -46,13 +46,19 @@ floor.rotation.x = -Math.PI / 2;
 floor.receiveShadow = true;
 scene.add(floor);
 
-const pad = new THREE.Mesh(
-  new THREE.RingGeometry(7.2, 7.4, 96),
-  new THREE.MeshStandardMaterial({ color: 0xf2f2f2, roughness: 0.8 })
-);
-pad.rotation.x = -Math.PI / 2;
-pad.position.y = 0.002;
-scene.add(pad);
+const marking = new THREE.MeshStandardMaterial({ color: 0xf4f4f2, roughness: 0.75 });
+const addFlat = (geometry, material, x, z, y) => {
+  const mesh = new THREE.Mesh(geometry, material);
+  mesh.rotation.x = -Math.PI / 2;
+  mesh.position.set(x, y, z);
+  mesh.receiveShadow = true;
+  scene.add(mesh);
+};
+addFlat(new THREE.CircleGeometry(7.8, 96), new THREE.MeshStandardMaterial({ color: 0x9da3aa, roughness: 0.9 }), -1.5, 0, 0.002);
+addFlat(new THREE.RingGeometry(7.2, 7.45, 96), marking, -1.5, 0, 0.004);
+addFlat(new THREE.PlaneGeometry(3.4, 0.45), marking, -1.5, 1.1, 0.004);
+addFlat(new THREE.PlaneGeometry(3.4, 0.45), marking, -1.5, -1.1, 0.004);
+addFlat(new THREE.PlaneGeometry(0.45, 1.75), marking, -1.5, 0, 0.004);
 
 const helicopter = createH125();
 scene.add(helicopter.root);

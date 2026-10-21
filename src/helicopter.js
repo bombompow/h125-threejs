@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 
 // Coordinates are in metres: +x points forward (nose), +y up, +z to the pilot's right.
 // The ground is y = 0 and the main rotor mast is at x = 0. Proportions follow the
@@ -46,11 +47,13 @@ function createMaterials() {
     }),
     interior: new THREE.MeshStandardMaterial({ color: 0x2b2f35, roughness: 0.85, side: THREE.BackSide }),
     cabin: new THREE.MeshStandardMaterial({ color: 0x30353c, roughness: 0.8 }),
-    seat: new THREE.MeshStandardMaterial({ color: 0x3a4250, roughness: 0.9 }),
+    seat: new THREE.MeshStandardMaterial({ color: 0x262b33, roughness: 0.95 }),
+    screen: new THREE.MeshStandardMaterial({ color: 0x0c1420, emissive: 0x1d4f7a, emissiveIntensity: 0.6, roughness: 0.2 }),
     darkMetal: new THREE.MeshStandardMaterial({ color: 0x2a2c30, metalness: 0.8, roughness: 0.4 }),
     steel: new THREE.MeshStandardMaterial({ color: 0xb8bcc2, metalness: 1, roughness: 0.3 }),
     skid: new THREE.MeshStandardMaterial({ color: 0x8c9198, metalness: 0.6, roughness: 0.35 }),
     blade: new THREE.MeshStandardMaterial({ color: 0x2b2d31, metalness: 0.2, roughness: 0.5 }),
+    bladeTip: new THREE.MeshStandardMaterial({ color: 0xb9bdc2, metalness: 0.6, roughness: 0.35 }),
     grille: new THREE.MeshStandardMaterial({ color: 0x15171a, metalness: 0.4, roughness: 0.7 }),
     exhaust: new THREE.MeshStandardMaterial({
       color: 0x3b3430,
@@ -225,9 +228,7 @@ const FUSELAGE_PROFILES = [
 const PAINT = 0;
 const GLASS = 1;
 
-// Height of the top of the dark lower livery: level along the cabin, then
-// sweeping up the rear fuselage.
-const liveryLine = (x) => (x > -0.5 ? 0.98 : 0.98 + (-0.5 - x) * 0.42);
+// Livery stripe above the dark lower body (whose line is in fuselagePaint).
 const STRIPE_HEIGHT = 0.07;
 const STRIPE_END_X = -2.6;
 
@@ -247,46 +248,106 @@ function fuselageRegion(x, t) {
 }
 
 /**
- * Livery paint: white with a dark lower body and a thin blue stripe. The split
- * is decided per pixel from interpolated (height above livery line, x) so the
- * boundaries stay crisp regardless of mesh resolution.
+ * Paint with detail drawn per pixel from the object-space position, so livery
+ * boundaries and panel seams stay crisp regardless of mesh resolution.
+ * `glsl` runs after the base colour is set and may change `diffuseColor`,
+ * using `p` (object-space position) and `seam(distance)`.
  */
-function liveryMaterial(m, geometry) {
-  const pos = geometry.attributes.position;
-  const livery = new Float32Array(pos.count * 2);
-  for (let i = 0; i < pos.count; i++) {
-    const x = pos.getX(i);
-    livery[i * 2] = pos.getY(i) - liveryLine(x);
-    livery[i * 2 + 1] = x;
-  }
-  geometry.setAttribute('livery', new THREE.BufferAttribute(livery, 2));
-
-  const material = m.paint.clone();
+function detailedPaint(base, glsl, uniforms = {}) {
+  const material = base.clone();
+  // Every instance shares the same onBeforeCompile source, so key programs by the injected code.
+  material.customProgramCacheKey = () => glsl;
   material.onBeforeCompile = (shader) => {
-    shader.uniforms.accentColor = { value: m.accent.color };
-    shader.uniforms.stripeColor = { value: m.stripe.color };
+    Object.assign(shader.uniforms, uniforms);
+    const declarations = Object.keys(uniforms)
+      .map((name) => `uniform vec3 ${name};`)
+      .join('\n');
     shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', '#include <common>\nattribute vec2 livery;\nvarying vec2 vLivery;')
-      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvLivery = livery;');
+      .replace('#include <common>', '#include <common>\nvarying vec3 vObjPos;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvObjPos = position;');
     shader.fragmentShader = shader.fragmentShader
       .replace(
         '#include <common>',
-        '#include <common>\nuniform vec3 accentColor;\nuniform vec3 stripeColor;\nvarying vec2 vLivery;'
+        `#include <common>
+        ${declarations}
+        varying vec3 vObjPos;
+        // 1 on a seam line of half width 4 mm, antialiased, 0 elsewhere.
+        float seam(float d) {
+          float aa = fwidth(d) * 1.2;
+          return 1.0 - smoothstep(0.004, 0.004 + aa, abs(d));
+        }`
       )
-      .replace(
-        '#include <color_fragment>',
-        `#include <color_fragment>
-        if (vLivery.x < 0.0) diffuseColor.rgb = accentColor;
-        else if (vLivery.x < ${STRIPE_HEIGHT.toFixed(3)} && vLivery.y > ${STRIPE_END_X.toFixed(3)}) diffuseColor.rgb = stripeColor;`
-      );
+      .replace('#include <color_fragment>', `#include <color_fragment>\n{ vec3 p = vObjPos;\n${glsl}\n}`);
   };
   return material;
+}
+
+const glslFloat = (v) => v.toFixed(3);
+
+// White with a dark lower body and thin blue stripe, plus door and access
+// panel seams.
+function fuselagePaint(m) {
+  return detailedPaint(
+    m.paint,
+    `
+    float line = p.x > -0.5 ? 0.98 : 0.98 + (-0.5 - p.x) * 0.42;
+    if (p.y < line) diffuseColor.rgb = accentColor;
+    else if (p.y < line + ${glslFloat(STRIPE_HEIGHT)} && p.x > ${glslFloat(STRIPE_END_X)}) diffuseColor.rgb = stripeColor;
+
+    float s = 0.0;
+    bool side = abs(p.z) > 0.45;
+    // Front and rear cabin doors.
+    if (side && p.y > 0.8 && p.y < 2.3) {
+      s = max(s, seam(p.x - 1.93));
+      s = max(s, seam(p.x - 0.94));
+      s = max(s, seam(p.x + 0.26));
+    }
+    if (side && p.x > -0.26 && p.x < 1.93) s = max(s, seam(p.y - 0.8));
+    // Baggage hold doors behind the cabin.
+    if (side && p.x < -0.55 && p.x > -1.45) {
+      s = max(s, seam(p.y - 2.0));
+      s = max(s, seam(p.y - line - 0.16));
+    }
+    if (side && p.y < 2.0 && p.y > line + 0.16) {
+      s = max(s, seam(p.x + 0.55));
+      s = max(s, seam(p.x + 1.45));
+    }
+    // Tail boom joint and a removable belly panel.
+    s = max(s, seam(p.x + 2.75));
+    if (abs(p.z) < 0.5 && p.y < 0.7 && p.x > 0.2 && p.x < 2.0) s = max(s, seam(abs(p.z) - 0.35));
+    diffuseColor.rgb *= 1.0 - 0.55 * s;
+    `,
+    { accentColor: { value: m.accent.color }, stripeColor: { value: m.stripe.color } }
+  );
+}
+
+// Engine and gearbox cowl panels.
+function cowlPaint(m) {
+  return detailedPaint(
+    m.paint,
+    `
+    float s = 0.0;
+    s = max(s, seam(p.x - 0.95));
+    s = max(s, seam(p.x + 1.05));
+    s = max(s, seam(p.x + 2.2));
+    if (abs(p.z) > 0.3) s = max(s, seam(p.y - 2.32));
+    diffuseColor.rgb *= 1.0 - 0.5 * s;
+
+    // Engine air intakes on both sides: dark recess with horizontal slats.
+    if (abs(p.z) > 0.5 && p.x < -0.3 && p.x > -0.9 && p.y > 2.44 && p.y < 2.66) {
+      float slat = step(0.5, fract((p.y - 2.44) / 0.036));
+      diffuseColor.rgb = mix(vec3(0.03), vec3(0.16), slat);
+      float rim = max(seam(p.x + 0.3), max(seam(p.x + 0.9), max(seam(p.y - 2.44), seam(p.y - 2.66))));
+      diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.55), rim);
+    }
+    `
+  );
 }
 
 function buildFuselage(m) {
   const group = new THREE.Group();
   const geometry = loftGeometry(FUSELAGE_PROFILES, { regionOf: fuselageRegion, groups: 2, stepsPerSegment: 14 });
-  const shell = new THREE.Mesh(geometry, [liveryMaterial(m, geometry), m.glass]);
+  const shell = new THREE.Mesh(geometry, [fuselagePaint(m), m.glass]);
   shell.castShadow = true;
   group.add(shell);
   // Same surface seen from inside gives the cabin a dark lining behind the glass.
@@ -308,16 +369,9 @@ function buildCowling(m) {
     { x: -2.5, yb: 2.18, yt: 2.22, hw: 0.02, nt: 2, nb: 2 },
   ];
   const group = new THREE.Group();
-  const cowl = new THREE.Mesh(loftGeometry(profiles, { stepsPerSegment: 12, radialSegments: 72 }), m.paint);
+  const cowl = new THREE.Mesh(loftGeometry(profiles, { stepsPerSegment: 12, radialSegments: 72 }), cowlPaint(m));
   cowl.castShadow = true;
   group.add(cowl);
-
-  // Engine air intake grilles on both sides.
-  for (const side of [1, -1]) {
-    const grille = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.18, 0.02), m.grille);
-    grille.position.set(-0.6, 2.55, side * 0.745);
-    group.add(grille);
-  }
 
   // Exhaust stack, angled back and slightly up.
   const exhaust = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.17, 0.42, 32, 1, true), m.exhaust);
@@ -338,19 +392,30 @@ function buildCabinInterior(m) {
     return mesh;
   };
 
-  add(new THREE.BoxGeometry(2.4, 0.04, 1.3), m.cabin, 1.1, 0.76, 0); // floor
-  add(new THREE.BoxGeometry(0.35, 0.3, 1.3), m.cabin, 2.55, 1.2, 0, 0.5); // instrument panel
-  add(new THREE.BoxGeometry(0.25, 0.04, 1.32), m.grille, 2.45, 1.38, 0, 0.2); // glareshield
+  const rounded = (w, h, d, r = 0.04) => new RoundedBoxGeometry(w, h, d, 3, r);
 
+  add(new THREE.BoxGeometry(2.4, 0.04, 1.3), m.cabin, 1.1, 0.76, 0); // floor
+
+  // Instrument panel with two dimly lit displays, under a glareshield.
+  add(rounded(0.3, 0.32, 1.25, 0.05), m.cabin, 2.55, 1.2, 0, 0.5);
+  add(rounded(0.26, 0.05, 1.3, 0.02), m.grille, 2.47, 1.38, 0, 0.2);
+  for (const z of [0.3, -0.3]) {
+    add(new THREE.PlaneGeometry(0.22, 0.17), m.screen, 2.46, 1.24, z).rotation.set(0, -Math.PI / 2, -0.5);
+  }
+
+  const seat = (x, z, back) => {
+    add(rounded(0.46, 0.1, 0.46), m.seat, x, 0.95, z);
+    add(rounded(0.1, back, 0.44), m.seat, x - 0.25, 0.97 + back / 2, z, -0.12);
+    add(rounded(0.08, 0.16, 0.26), m.seat, x - 0.3, 1.04 + back, z, -0.12); // headrest
+  };
   for (const z of [0.42, -0.42]) {
-    add(new THREE.BoxGeometry(0.5, 0.12, 0.5), m.seat, 1.6, 0.95, z);
-    add(new THREE.BoxGeometry(0.1, 0.75, 0.5), m.seat, 1.33, 1.35, z, -0.12);
+    seat(1.58, z, 0.62);
     add(new THREE.CylinderGeometry(0.015, 0.015, 0.55, 8), m.darkMetal, 1.93, 1.0, z, -0.25); // cyclic
   }
-  for (const z of [0.55, 0, -0.55]) {
-    add(new THREE.BoxGeometry(0.48, 0.12, 0.5), m.seat, 0.35, 0.95, z);
-    add(new THREE.BoxGeometry(0.1, 0.72, 0.5), m.seat, 0.08, 1.34, z, -0.1);
-  }
+  // Collective lever beside the left (pilot's) seat.
+  add(new THREE.CylinderGeometry(0.014, 0.014, 0.45, 8), m.darkMetal, 1.6, 0.98, -0.12, 1.2);
+  for (const z of [0.5, 0, -0.5]) seat(0.38, z, 0.58);
+
   return group;
 }
 
@@ -431,9 +496,16 @@ function buildMainRotor(m) {
     pitchLink.position.set(0.24, -0.09, 0.09);
     arm.add(pitchLink);
 
+    // Blades sag a little at rest.
     const b = new THREE.Mesh(blade, m.blade);
+    b.rotation.z = -0.018;
     b.castShadow = true;
     arm.add(b);
+
+    // Light grey erosion cap on the tip.
+    const tipCap = new THREE.Mesh(bladeGeometry(MAIN_ROTOR_RADIUS - 0.25, MAIN_ROTOR_RADIUS + 0.002, 0.352, 0.125), m.bladeTip);
+    tipCap.rotation.z = -0.018;
+    arm.add(tipCap);
   }
 
   return { head, rotor };
@@ -581,6 +653,46 @@ function buildSkids(m) {
   return group;
 }
 
+// Door handles, pitot tubes, antennas, landing light and cargo hook.
+function buildDetails(m) {
+  const group = new THREE.Group();
+  const add = (geometry, material, x, y, z) => {
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.position.set(x, y, z);
+    group.add(mesh);
+    return mesh;
+  };
+
+  for (const side of [1, -1]) {
+    // Door handles, just proud of the skin near each door's trailing edge.
+    add(new THREE.BoxGeometry(0.14, 0.025, 0.025), m.steel, 1.06, 1.45, side * 0.935);
+    add(new THREE.BoxGeometry(0.14, 0.025, 0.025), m.steel, -0.12, 1.45, side * 0.935);
+    // Baggage hold latch.
+    add(new THREE.BoxGeometry(0.08, 0.02, 0.02), m.steel, -0.75, 1.6, side * 0.83);
+
+    // Pitot tubes on short masts above the windscreen.
+    const mast = add(new THREE.BoxGeometry(0.03, 0.1, 0.01), m.darkMetal, 2.1, 2.38, side * 0.22);
+    mast.rotation.z = -0.4;
+    const tube = add(new THREE.CylinderGeometry(0.008, 0.008, 0.16, 8), m.steel, 2.16, 2.43, side * 0.22);
+    tube.rotation.z = Math.PI / 2;
+  }
+
+  // Swept VHF blade antenna under the belly and a GPS puck on the cowl.
+  const blade = add(new THREE.BoxGeometry(0.2, 0.16, 0.012), m.darkMetal, -0.9, 0.72, 0);
+  blade.rotation.z = -0.35;
+  add(new THREE.CylinderGeometry(0.05, 0.06, 0.02, 20), m.grille, -1.5, 2.73, 0);
+
+  // Retractable landing light under the chin.
+  const light = add(new THREE.CylinderGeometry(0.07, 0.07, 0.03, 24), m.steel, 2.6, 0.68, 0);
+  light.rotation.z = 0.5;
+  add(new THREE.CircleGeometry(0.06, 24), m.navWhite, 2.6, 0.66, 0).rotation.set(Math.PI / 2, 0.5, 0);
+
+  // Cargo hook under the centre of gravity.
+  add(new THREE.BoxGeometry(0.16, 0.06, 0.1), m.darkMetal, 0, 0.58, 0);
+
+  return group;
+}
+
 /** Builds the H125 and returns its root object plus an `update` for animation. */
 export function createH125() {
   const m = createMaterials();
@@ -592,6 +704,7 @@ export function createH125() {
   root.add(buildCabinInterior(m));
   root.add(buildTail(m));
   root.add(buildSkids(m));
+  root.add(buildDetails(m));
 
   const main = buildMainRotor(m);
   root.add(main.head);
